@@ -124,15 +124,18 @@ def get_video_duration(video_path):
 
 def compose_final_video(headline_img, collage_img, video_path, logo_path, output_path):
     """
-    Compose final video with high quality and fast encoding:
+    Compose final video with hardware acceleration and optimized encoding:
     - Headline and collage on left side
     - Video on right side
     - Logo at center with 50% opacity
     - Same duration as input video
-    - Optimized for VPS performance
+    - GPU-accelerated encoding when available
+    - Fast turnaround with high quality
     """
     
     try:
+        from config import ENABLE_GPU_ENCODING, GPU_DEVICE_ID, VIDEO_PRESET, VIDEO_CRF, AUDIO_BITRATE, FFMPEG_TIMEOUT
+        
         # Get video duration (will use fallback methods if needed)
         duration = get_video_duration(video_path)
         
@@ -147,16 +150,15 @@ def compose_final_video(headline_img, collage_img, video_path, logo_path, output
         static_frame.paste(headline_img, (0, 0))
         static_frame.paste(collage_img, (0, HEADLINE_HEIGHT))
         
-        # Save static frame temporarily
+        # Save static frame temporarily with high quality
         static_frame_path = os.path.join(TEMP_DIR, 'static_frame.png')
-        static_frame.save(static_frame_path, quality=95)
+        static_frame.save(static_frame_path, quality=95, optimize=False)
         logger.info(f"Saved static frame: {static_frame_path}")
         
         right_side_x = CONTENT_SIDE_WIDTH
         right_side_y = HEADLINE_HEIGHT
         
-        # Build optimized FFmpeg command for VPS
-        # Using faster preset and CRF for quality
+        # Build optimized FFmpeg command with GPU acceleration
         cmd = [
             'ffmpeg',
             '-y',  # Overwrite
@@ -197,18 +199,51 @@ def compose_final_video(headline_img, collage_img, video_path, logo_path, output
             '-filter_complex', filter_complex,
             '-map', output_map,
             '-map', '1:a',  # Audio from video
-            '-c:v', 'libx264',
-            '-preset', VIDEO_PRESET,  # fast/faster for VPS
-            '-crf', str(VIDEO_CRF),  # Quality: 20 = high quality
+        ])
+        
+        # Choose encoder based on GPU availability
+        try:
+            # Try GPU encoding (NVIDIA NVENC)
+            if ENABLE_GPU_ENCODING:
+                # Check if NVIDIA GPU is available
+                result = subprocess.run(['ffmpeg', '-encoders'], capture_output=True, text=True, timeout=5)
+                if 'hevc_nvenc' in result.stdout or 'h264_nvenc' in result.stdout:
+                    logger.info("✓ GPU encoding (NVIDIA NVENC) available, using h264_nvenc")
+                    cmd.extend([
+                        '-c:v', 'h264_nvenc',
+                        '-preset', 'fast',  # NVIDIA: default, fast, slow
+                        '-rc', 'vbr',  # Variable bitrate for quality
+                        '-cq', str(VIDEO_CRF),  # Quality
+                        '-b:v', '0',  # Auto bitrate
+                    ])
+                else:
+                    logger.info("GPU encoding not available, using CPU x264")
+                    raise Exception("GPU not found")
+        except Exception as e:
+            logger.warning(f"GPU acceleration unavailable: {e}")
+            # Fallback to CPU encoding with optimizations
+            cmd.extend([
+                '-c:v', 'libx264',
+                '-preset', VIDEO_PRESET,
+                '-crf', str(VIDEO_CRF),
+                '-tune', 'film',  # Optimize for video quality
+                '-profile:v', 'high',  # Use high profile for better compression
+                '-level:v', '4.2',  # Target level for compatibility
+            ])
+        
+        cmd.extend([
             '-c:a', 'aac',
             '-b:a', AUDIO_BITRATE,
             '-shortest',
-            '-t', str(duration),
-            '-movflags', 'faststart',  # Stream-friendly
+            '-t', str(int(duration) + 1),  # Add 1 second buffer
+            '-movflags', 'faststart',  # Enable streaming
+            '-pix_fmt', 'yuv420p',  # Compatibility
             output_path
         ])
         
         logger.info(f"Running FFmpeg with preset={VIDEO_PRESET}, crf={VIDEO_CRF}")
+        logger.info(f"FFmpeg command: {' '.join(cmd[:15])}...")
+        
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=FFMPEG_TIMEOUT)
         
         if result.returncode != 0:
@@ -219,7 +254,8 @@ def compose_final_video(headline_img, collage_img, video_path, logo_path, output
             logger.error("Output file was not created")
             return False
         
-        logger.info(f"Video created successfully: {output_path}")
+        file_size = os.path.getsize(output_path) / (1024 * 1024)
+        logger.info(f"✓ Video created successfully: {output_path} ({file_size:.1f}MB)")
         return True
         
     except subprocess.TimeoutExpired:
@@ -227,6 +263,8 @@ def compose_final_video(headline_img, collage_img, video_path, logo_path, output
         return False
     except Exception as e:
         logger.error(f"Error composing video: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         return False
 
 

@@ -6,6 +6,8 @@ from datetime import datetime
 from enum import Enum
 import logging
 import traceback
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 from telegram import Update, ReplyKeyboardRemove
 from telegram.ext import (
@@ -37,6 +39,9 @@ logger = logging.getLogger(__name__)
 
 # Ensure temp directory exists
 os.makedirs(TEMP_DIR, exist_ok=True)
+
+# Thread pool for background processing (prevents blocking)
+executor = ThreadPoolExecutor(max_workers=2)
 
 # Conversation states
 WAITING_HEADLINE = 1
@@ -451,8 +456,30 @@ async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         return WAITING_VIDEO
 
 
+def process_video_background(headline_img, collage_img, video_path, logo_path, output_path):
+    """Background thread function for video processing (prevents blocking)"""
+    try:
+        logger.info("🎥 Starting background video processing...")
+        start_time = datetime.now()
+        
+        success = compose_final_video(
+            headline_img, collage_img, video_path, logo_path, output_path
+        )
+        
+        elapsed = (datetime.now() - start_time).total_seconds()
+        if success:
+            logger.info(f"✓ Video processing completed in {elapsed:.1f}s")
+        else:
+            logger.error(f"✗ Video processing failed after {elapsed:.1f}s")
+        
+        return success
+    except Exception as e:
+        logger.error(f"Background processing error: {e}\n{traceback.format_exc()}")
+        return False
+
+
 async def process_video(update: Update, context: ContextTypes.DEFAULT_TYPE, session: BotSession) -> int:
-    """Process all files and create final video"""
+    """Process all files and create final video with async background processing"""
     
     try:
         logger.info(f"Starting video processing for user {session.user_id}")
@@ -503,9 +530,25 @@ async def process_video(update: Update, context: ContextTypes.DEFAULT_TYPE, sess
         output_path = os.path.join(session.temp_dir, "final_video.mp4")
         logger.info(f"Composing video: {output_path}")
         
-        success = compose_final_video(
+        # Step 3: Compose final video in background (async, non-blocking)
+        logger.info("Running video composition in background thread...")
+        await progress_msg.edit_text(
+            "🎬 <b>Processing your video...</b>\n\n"
+            "1️⃣ Creating headline... ✅\n"
+            "2️⃣ Creating collage... ✅\n"
+            "3️⃣ Composing video... ⏳\n"
+            "   (Running in background...)"
+        )
+        
+        # Run video composition in thread pool to prevent blocking
+        loop = asyncio.get_event_loop()
+        start_time = datetime.now()
+        success = await loop.run_in_executor(
+            executor,
+            process_video_background,
             headline_img, collage_img, session.video, LOGO_PATH, output_path
         )
+        elapsed = (datetime.now() - start_time).total_seconds()
         
         if not success:
             raise Exception("Video composition failed - check logs")
@@ -514,14 +557,14 @@ async def process_video(update: Update, context: ContextTypes.DEFAULT_TYPE, sess
             raise Exception("Output video file was not created")
         
         file_size_mb = os.path.getsize(output_path) / (1024 * 1024)
-        logger.info(f"Video created successfully: {file_size_mb:.1f}MB")
+        logger.info(f"✓ Video created successfully: {file_size_mb:.1f}MB in {elapsed:.1f}s")
         
         # Progress: Uploading
         await progress_msg.edit_text(
             "🎬 <b>Processing your video...</b>\n\n"
             "1️⃣ Creating headline... ✅\n"
             "2️⃣ Creating collage... ✅\n"
-            "3️⃣ Composing video... ✅\n"
+            f"3️⃣ Composing video... ✅ ({elapsed:.1f}s)\n"
             "4️⃣ Uploading... ⏳"
         )
         
@@ -536,7 +579,8 @@ async def process_video(update: Update, context: ContextTypes.DEFAULT_TYPE, sess
                     "📊 <b>Specs:</b>\n"
                     f"• Size: {file_size_mb:.1f}MB\n"
                     f"• Ratio: 4:5 (1080x1350)\n"
-                    f"• Quality: High\n\n"
+                    f"• Quality: High (CRF 18)\n"
+                    f"• Processed in: {elapsed:.1f}s\n\n"
                     "💾 Download and share on Instagram!\n\n"
                     "Use /start to create another video."
                 ),

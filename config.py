@@ -24,24 +24,34 @@ LOGO_SIZE = 100
 LOGO_OPACITY = 0.5
 
 # ============ IMAGE UPSCALING SETTINGS ============
-# Upscale factor for low-res images (1.0 = no upscale, 1.5 = 1.5x upscale)
-UPSCALE_FACTOR = 1.2  # Subtle upscaling like Topaz, not overdone
+# Upscale factor for low-res images (1.0 = no upscale, 2.0 = 2x upscale like Topaz Proteus)
+UPSCALE_FACTOR = 1.8  # Advanced upscaling like Topaz Proteus
 ENABLE_UPSCALING = True
 # Image quality: 1=poor, 95=excellent (higher = slower)
-IMAGE_QUALITY = 92
+IMAGE_QUALITY = 95  # Maximum quality for Instagram
 # Resampling filter: 0=NEAREST, 1=LANCZOS (best), 2=BILINEAR, 3=BICUBIC
-RESAMPLE_FILTER = 1  # LANCZOS
+RESAMPLE_FILTER = 1  # LANCZOS (best quality)
+# Use advanced upscaling algorithm (like Proteus/professional upscalers)
+ADVANCED_UPSCALING_ENABLED = True
+# Number of upscaling steps for multi-pass upscaling
+UPSCALE_STEPS = 3
 
 # ============ VIDEO ENCODING SETTINGS ============
 # Preset: ultrafast, superfast, veryfast, faster, fast, medium, slow, slower, veryslow
 # faster = less quality but quick | slow = better quality but slower
-VIDEO_PRESET = "faster"  # Balanced for VPS
+VIDEO_PRESET = "fast"  # Faster encoding for quick turnaround
 # CRF (quality): 0-51, lower=better. 23 is default, 18-23 is high quality
-VIDEO_CRF = 20  # High quality
+VIDEO_CRF = 18  # Very high quality for Instagram
 # Bitrate (kbps) - None = use CRF, or specify like "8000k"
 VIDEO_BITRATE = None
 # Audio bitrate
-AUDIO_BITRATE = "192k"
+AUDIO_BITRATE = "256k"  # Higher audio quality
+
+# ============ HARDWARE ACCELERATION ============
+# Enable hardware-accelerated encoding if available (CUDA/NVENC for NVIDIA)
+ENABLE_GPU_ENCODING = True
+# GPU device to use (-1 = auto, 0 = first GPU)
+GPU_DEVICE_ID = -1
 
 # ============ FILE PATHS ============
 ASSETS_DIR = "assets"
