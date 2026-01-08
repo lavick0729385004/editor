@@ -172,6 +172,39 @@ async def receive_headline(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return WAITING_HEADLINE
 
 
+async def proceed_to_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Proceed from images to video step"""
+    
+    try:
+        session = context.user_data.get('session')
+        if not session:
+            await update.message.reply_text("❌ Session error. Please /start again")
+            return ConversationHandler.END
+        
+        if not session.images:
+            await update.message.reply_text(
+                "⚠️ Please send at least 1 image before proceeding.\n"
+                "Send images or /cancel to start over."
+            )
+            return WAITING_IMAGES
+        
+        logger.info(f"User {session.user_id} proceeding with {len(session.images)} images")
+        
+        await update.message.reply_text(
+            f"✅ <b>{len(session.images)} image(s) saved!</b>\n\n"
+            f"🎥 Now send your <b>video file</b> (MP4, MOV, AVI).\n"
+            f"The video fills the right side of the final composition.\n\n"
+            f"Max size: {MAX_VIDEO_SIZE}MB",
+            parse_mode='HTML'
+        )
+        return WAITING_VIDEO
+        
+    except Exception as e:
+        logger.error(f"Error in proceed_to_video: {e}\n{traceback.format_exc()}")
+        await update.message.reply_text("❌ Error processing. Try /start again.")
+        return ConversationHandler.END
+
+
 async def receive_images(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Receive images for collage"""
     
@@ -180,23 +213,6 @@ async def receive_images(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         if not session:
             await update.message.reply_text("❌ Session error. Please /start again")
             return ConversationHandler.END
-        
-        # Check for done command
-        if update.message.text and update.message.text.lower() in ['/done', '/next']:
-            if not session.images:
-                await update.message.reply_text(
-                    "⚠️ Please send at least 1 image before proceeding.\n"
-                    "Send images or /cancel to start over."
-                )
-                return WAITING_IMAGES
-            
-            await update.message.reply_text(
-                f"✅ <b>{len(session.images)} image(s) saved!</b>\n\n"
-                f"🎥 Now send your <b>video file</b> (MP4, MOV, AVI).\n"
-                f"The video fills the right side of the final composition.",
-                parse_mode='HTML'
-            )
-            return WAITING_VIDEO
         
         # Handle photo
         if update.message.photo:
@@ -559,15 +575,20 @@ def main():
             entry_points=[CommandHandler('start', start)],
             states={
                 WAITING_HEADLINE: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, receive_headline)
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, receive_headline),
+                    CommandHandler('cancel', cancel),
                 ],
                 WAITING_IMAGES: [
                     MessageHandler(filters.PHOTO, receive_images),
-                    MessageHandler(filters.Document.ALL, receive_images),
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, receive_images),
+                    MessageHandler(filters.Document.IMAGE, receive_images),
+                    CommandHandler('done', lambda u, c: proceed_to_video(u, c)),
+                    CommandHandler('next', lambda u, c: proceed_to_video(u, c)),
+                    CommandHandler('cancel', cancel),
                 ],
                 WAITING_VIDEO: [
+                    MessageHandler(filters.Document.VIDEO, receive_video),
                     MessageHandler(filters.Document.ALL, receive_video),
+                    CommandHandler('cancel', cancel),
                 ],
             },
             fallbacks=[CommandHandler('cancel', cancel)],
