@@ -201,50 +201,66 @@ def compose_final_video(headline_img, collage_img, video_path, logo_path, output
             '-map', '1:a',  # Audio from video
         ])
         
-        # Choose encoder based on GPU availability
-        try:
-            # Try GPU encoding (NVIDIA NVENC)
-            if ENABLE_GPU_ENCODING:
-                # Check if NVIDIA GPU is available
-                result = subprocess.run(['ffmpeg', '-encoders'], capture_output=True, text=True, timeout=5)
-                if 'hevc_nvenc' in result.stdout or 'h264_nvenc' in result.stdout:
-                    logger.info("✓ GPU encoding (NVIDIA NVENC) available, using h264_nvenc")
-                    cmd.extend([
-                        '-c:v', 'h264_nvenc',
-                        '-preset', 'fast',  # NVIDIA: default, fast, slow
-                        '-rc', 'vbr',  # Variable bitrate for quality
-                        '-cq', str(VIDEO_CRF),  # Quality
-                        '-b:v', '0',  # Auto bitrate
-                    ])
-                else:
-                    logger.info("GPU encoding not available, using CPU x264")
-                    raise Exception("GPU not found")
-        except Exception as e:
-            logger.warning(f"GPU acceleration unavailable: {e}")
-            # Fallback to CPU encoding with optimizations
-            cmd.extend([
+        # Try GPU encoding first, fall back to CPU if it fails
+        use_gpu = False
+        if ENABLE_GPU_ENCODING:
+            result = subprocess.run(['ffmpeg', '-encoders'], capture_output=True, text=True, timeout=5)
+            if 'h264_nvenc' in result.stdout or 'hevc_nvenc' in result.stdout:
+                use_gpu = True
+                logger.info("⚡ GPU encoder detected, attempting GPU encoding...")
+        
+        if use_gpu:
+            gpu_cmd = cmd.copy()
+            gpu_cmd.extend([
+                '-c:v', 'h264_nvenc',
+                '-preset', 'fast',
+                '-rc', 'vbr',
+                '-cq', str(VIDEO_CRF),
+                '-b:v', '0',
+                '-c:a', 'aac',
+                '-b:a', AUDIO_BITRATE,
+                '-shortest',
+                '-t', str(int(duration) + 1),
+                '-movflags', 'faststart',
+                '-pix_fmt', 'yuv420p',
+                output_path
+            ])
+            
+            logger.info("Running FFmpeg with GPU (h264_nvenc)...")
+            result = subprocess.run(gpu_cmd, capture_output=True, text=True, timeout=FFMPEG_TIMEOUT)
+            
+            if result.returncode != 0:
+                logger.warning(f"GPU encoding failed: {result.stderr[:200]}")
+                logger.warning("Falling back to CPU encoding...")
+                # Remove output file if partially created
+                if os.path.exists(output_path):
+                    os.remove(output_path)
+                use_gpu = False
+            else:
+                logger.info("✓ GPU encoding successful!")
+                return True
+        
+        # CPU fallback encoding
+        if not use_gpu:
+            cpu_cmd = cmd.copy()
+            cpu_cmd.extend([
                 '-c:v', 'libx264',
                 '-preset', VIDEO_PRESET,
                 '-crf', str(VIDEO_CRF),
-                '-tune', 'film',  # Optimize for video quality
-                '-profile:v', 'high',  # Use high profile for better compression
-                '-level:v', '4.2',  # Target level for compatibility
+                '-tune', 'film',
+                '-profile:v', 'high',
+                '-level:v', '4.2',
+                '-c:a', 'aac',
+                '-b:a', AUDIO_BITRATE,
+                '-shortest',
+                '-t', str(int(duration) + 1),
+                '-movflags', 'faststart',
+                '-pix_fmt', 'yuv420p',
+                output_path
             ])
-        
-        cmd.extend([
-            '-c:a', 'aac',
-            '-b:a', AUDIO_BITRATE,
-            '-shortest',
-            '-t', str(int(duration) + 1),  # Add 1 second buffer
-            '-movflags', 'faststart',  # Enable streaming
-            '-pix_fmt', 'yuv420p',  # Compatibility
-            output_path
-        ])
-        
-        logger.info(f"Running FFmpeg with preset={VIDEO_PRESET}, crf={VIDEO_CRF}")
-        logger.info(f"FFmpeg command: {' '.join(cmd[:15])}...")
-        
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=FFMPEG_TIMEOUT)
+            
+            logger.info(f"Running FFmpeg with CPU (libx264) preset={VIDEO_PRESET}, crf={VIDEO_CRF}...")
+            result = subprocess.run(cpu_cmd, capture_output=True, text=True, timeout=FFMPEG_TIMEOUT)
         
         if result.returncode != 0:
             logger.error(f"FFmpeg error: {result.stderr}")
