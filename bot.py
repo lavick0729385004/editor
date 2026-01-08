@@ -317,66 +317,110 @@ async def receive_images(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Receive video file"""
+    """Receive video file and start processing"""
+    
+    print("\n" + "=" * 60)
+    print("🎥 RECEIVE_VIDEO HANDLER CALLED!")
+    print("=" * 60)
     
     try:
+        logger.critical("=" * 60)
+        logger.critical("🎥 RECEIVE_VIDEO CALLED - VIDEO RECEIVED!")
+        logger.critical("=" * 60)
+        
         session = context.user_data.get('session')
         if not session:
+            logger.error("No session found!")
             await update.message.reply_text("❌ Session error. Please /start again")
             return ConversationHandler.END
         
-        if update.message.document:
-            doc = update.message.document
-            file_ext = os.path.splitext(doc.file_name)[1].lower()
-            
-            if file_ext not in SUPPORTED_VIDEO_FORMATS:
-                await update.message.reply_text(
-                    f"⚠️ Unsupported format: {file_ext}\n"
-                    f"Supported: {', '.join(SUPPORTED_VIDEO_FORMATS)}"
-                )
-                return WAITING_VIDEO
-            
-            file_size_mb = doc.file_size / (1024 * 1024)
-            if file_size_mb > MAX_VIDEO_SIZE:
-                await update.message.reply_text(
-                    f"⚠️ Video too large ({file_size_mb:.1f}MB). Max: {MAX_VIDEO_SIZE}MB"
-                )
-                return WAITING_VIDEO
-            
-            # Check session size
-            try:
-                session.add_file_size(doc.file_size)
-            except Exception as e:
-                await update.message.reply_text(f"⚠️ {str(e)}")
-                return WAITING_VIDEO
-            
-            # Notify download starting
-            await update.message.chat.send_action(ChatAction.UPLOAD_VIDEO)
-            await update.message.reply_text(
-                "📥 Downloading video... ⏳\n"
-                "(Please wait, do not send other messages)"
-            )
-            
-            logger.info(f"User {session.user_id} uploading video: {doc.file_name} ({file_size_mb:.1f}MB)")
-            
-            # Download video
-            file_obj = await doc.get_file()
-            video_path = os.path.join(session.temp_dir, f"video{file_ext}")
-            await file_obj.download_to_drive(video_path)
-            session.video = video_path
-            
-            logger.info(f"Video download complete: {video_path}")
-            
-            # Start processing
-            await process_video(update, context, session)
-            
-        else:
-            await update.message.reply_text("⚠️ Please send a video file.")
+        logger.info(f"Session found for user {session.user_id}")
+        
+        # Check for both video (when sent as video) and document (when sent as file)
+        logger.info(f"Message check: has_video={update.message.video is not None}, has_document={update.message.document is not None}")
+        
+        doc = update.message.video or update.message.document
+        
+        if not doc:
+            logger.warning("No video or document in message!")
+            logger.warning(f"Message type: {type(update.message)}")
+            logger.warning(f"Message content_type: {update.message.content_type}")
+            await update.message.reply_text("⚠️ Please send a video file as VIDEO (not as document).")
             return WAITING_VIDEO
+        
+        logger.info(f"Video/Document received: {doc.file_name if hasattr(doc, 'file_name') else 'N/A'}, size: {doc.file_size} bytes")
+        
+        # Get file extension (videos might not have file_name, so use default)
+        file_name = getattr(doc, 'file_name', 'video.mp4')
+        file_ext = os.path.splitext(file_name)[1].lower() or '.mp4'
+        
+        logger.info(f"File name: {file_name}, Extension: {file_ext}")
+        logger.info(f"Supported formats: {SUPPORTED_VIDEO_FORMATS}")
+        
+        if file_ext not in SUPPORTED_VIDEO_FORMATS:
+            msg = f"⚠️ Unsupported format: {file_ext}\nSupported: {', '.join(SUPPORTED_VIDEO_FORMATS)}"
+            logger.warning(msg)
+            await update.message.reply_text(msg)
+            return WAITING_VIDEO
+        
+        file_size_mb = doc.file_size / (1024 * 1024)
+        if file_size_mb > MAX_VIDEO_SIZE:
+            msg = f"⚠️ Video too large ({file_size_mb:.1f}MB). Max: {MAX_VIDEO_SIZE}MB"
+            logger.warning(msg)
+            await update.message.reply_text(msg)
+            return WAITING_VIDEO
+        
+        # Check session size
+        try:
+            session.add_file_size(doc.file_size)
+            logger.info(f"Session size check passed. Total: {session.total_size / (1024*1024):.1f}MB")
+        except Exception as e:
+            logger.error(f"Session size check failed: {e}")
+            await update.message.reply_text(f"⚠️ {str(e)}")
+            return WAITING_VIDEO
+        
+        # Notify download starting
+        logger.info("Sending download notification...")
+        await update.message.chat.send_action(ChatAction.UPLOAD_VIDEO)
+        await update.message.reply_text(
+            "📥 Downloading video... ⏳\n"
+            "(Please wait, this might take a moment)"
+        )
+        
+        logger.info(f"Downloading video: {doc.file_name} ({file_size_mb:.1f}MB)")
+        
+        # Download video
+        file_obj = await doc.get_file()
+        video_path = os.path.join(session.temp_dir, f"video{file_ext}")
+        logger.info(f"Saving to: {video_path}")
+        
+        await file_obj.download_to_drive(video_path)
+        
+        # Verify file exists
+        if not os.path.exists(video_path):
+            logger.error(f"Video file not found after download: {video_path}")
+            await update.message.reply_text("❌ Error saving video file.")
+            return WAITING_VIDEO
+        
+        session.video = video_path
+        logger.info(f"✓ Video download complete: {video_path}")
+        logger.info(f"Video file size: {os.path.getsize(video_path) / (1024*1024):.1f}MB")
+        
+        # Start processing
+        logger.info("Starting video processing...")
+        await process_video(update, context, session)
+        
+        return ConversationHandler.END
             
     except Exception as e:
-        logger.error(f"Error in receive_video: {e}\n{traceback.format_exc()}")
-        await update.message.reply_text(f"❌ Error downloading video: {str(e)[:100]}")
+        error_msg = f"❌ ERROR in receive_video: {type(e).__name__}: {e}"
+        logger.error(error_msg)
+        logger.error(traceback.format_exc())
+        print(f"\n{error_msg}\n")
+        try:
+            await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
+        except:
+            logger.error("Could not send error message to user")
         return WAITING_VIDEO
 
 
@@ -586,8 +630,9 @@ def main():
                     CommandHandler('cancel', cancel),
                 ],
                 WAITING_VIDEO: [
-                    MessageHandler(filters.Document.VIDEO, receive_video),
-                    MessageHandler(filters.Document.ALL, receive_video),
+                    MessageHandler(filters.VIDEO, receive_video),  # For videos sent as VIDEO
+                    MessageHandler(filters.Document.VIDEO, receive_video),  # For videos sent as documents
+                    MessageHandler(filters.Document.ALL, receive_video),  # Fallback for any document
                     CommandHandler('cancel', cancel),
                 ],
             },
