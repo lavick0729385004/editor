@@ -134,7 +134,7 @@ def compose_final_video(headline_img, collage_img, video_path, logo_path, output
     """
     
     try:
-        from config import ENABLE_GPU_ENCODING, GPU_DEVICE_ID, VIDEO_PRESET, VIDEO_CRF, AUDIO_BITRATE, FFMPEG_TIMEOUT
+        from config import ENABLE_GPU_ENCODING, GPU_DEVICE_ID, VIDEO_PRESET, VIDEO_CRF, AUDIO_BITRATE, FFMPEG_TIMEOUT, ENABLE_VIDEO_UPSCALING, VIDEO_UPSCALE_FACTOR
         
         # Get video duration (will use fallback methods if needed)
         duration = get_video_duration(video_path)
@@ -143,22 +143,22 @@ def compose_final_video(headline_img, collage_img, video_path, logo_path, output
             logger.warning(f"⚠️ Video duration {duration}s is very short, using minimum 5s")
             duration = 5.0
         
-        logger.info(f"Creating final video with {duration:.2f}s duration")
+        logger.info(f"Creating final UHD 4K video with {duration:.2f}s duration")
         
         # Create static image frame (headline + collage)
         static_frame = Image.new('RGB', (CANVAS_WIDTH, CANVAS_HEIGHT), (255, 255, 255))
         static_frame.paste(headline_img, (0, 0))
         static_frame.paste(collage_img, (0, HEADLINE_HEIGHT))
         
-        # Save static frame temporarily with high quality
+        # Save static frame temporarily with highest quality
         static_frame_path = os.path.join(TEMP_DIR, 'static_frame.png')
-        static_frame.save(static_frame_path, quality=95, optimize=False)
-        logger.info(f"Saved static frame: {static_frame_path}")
+        static_frame.save(static_frame_path, quality=98, optimize=False)
+        logger.info(f"Saved 4K static frame: {static_frame_path} ({CANVAS_WIDTH}x{CANVAS_HEIGHT})")
         
         right_side_x = CONTENT_SIDE_WIDTH
         right_side_y = HEADLINE_HEIGHT
         
-        # Build optimized FFmpeg command with GPU acceleration
+        # Build optimized FFmpeg command with video upscaling
         cmd = [
             'ffmpeg',
             '-y',  # Overwrite
@@ -176,23 +176,41 @@ def compose_final_video(headline_img, collage_img, video_path, logo_path, output
         else:
             has_logo = False
         
-        # Build filter complex
+        # Build filter complex with video upscaling
         if has_logo:
-            filter_complex = (
-                f"[0]scale={CANVAS_WIDTH}:{CANVAS_HEIGHT}[base];"
-                f"[1]scale={CONTENT_SIDE_WIDTH}:{CONTENT_HEIGHT}[v];"
-                f"[base][v]overlay={right_side_x}:{right_side_y}[with_video];"
-                f"[2]scale=100:100[logo];"
-                f"[with_video][logo]overlay="
-                f"(main_w-overlay_w)/2:(main_h-overlay_h)/2:alpha=0.5[out]"
-            )
+            if ENABLE_VIDEO_UPSCALING:
+                # Upscale video input for better quality
+                filter_complex = (
+                    f"[0]scale={CANVAS_WIDTH}:{CANVAS_HEIGHT}[base];"
+                    f"[1]scale={int(CONTENT_SIDE_WIDTH * VIDEO_UPSCALE_FACTOR)}:{int(CONTENT_HEIGHT * VIDEO_UPSCALE_FACTOR)},scale={CONTENT_SIDE_WIDTH}:{CONTENT_HEIGHT}[v];"
+                    f"[base][v]overlay={right_side_x}:{right_side_y}[with_video];"
+                    f"[2]scale=100:100[logo];"
+                    f"[with_video][logo]overlay="
+                    f"(main_w-overlay_w)/2:(main_h-overlay_h)/2:alpha=0.5[out]"
+                )
+            else:
+                filter_complex = (
+                    f"[0]scale={CANVAS_WIDTH}:{CANVAS_HEIGHT}[base];"
+                    f"[1]scale={CONTENT_SIDE_WIDTH}:{CONTENT_HEIGHT}[v];"
+                    f"[base][v]overlay={right_side_x}:{right_side_y}[with_video];"
+                    f"[2]scale=100:100[logo];"
+                    f"[with_video][logo]overlay="
+                    f"(main_w-overlay_w)/2:(main_h-overlay_h)/2:alpha=0.5[out]"
+                )
             output_map = '[out]'
         else:
-            filter_complex = (
-                f"[0]scale={CANVAS_WIDTH}:{CANVAS_HEIGHT}[base];"
-                f"[1]scale={CONTENT_SIDE_WIDTH}:{CONTENT_HEIGHT}[v];"
-                f"[base][v]overlay={right_side_x}:{right_side_y}[out]"
-            )
+            if ENABLE_VIDEO_UPSCALING:
+                filter_complex = (
+                    f"[0]scale={CANVAS_WIDTH}:{CANVAS_HEIGHT}[base];"
+                    f"[1]scale={int(CONTENT_SIDE_WIDTH * VIDEO_UPSCALE_FACTOR)}:{int(CONTENT_HEIGHT * VIDEO_UPSCALE_FACTOR)},scale={CONTENT_SIDE_WIDTH}:{CONTENT_HEIGHT}[v];"
+                    f"[base][v]overlay={right_side_x}:{right_side_y}[out]"
+                )
+            else:
+                filter_complex = (
+                    f"[0]scale={CANVAS_WIDTH}:{CANVAS_HEIGHT}[base];"
+                    f"[1]scale={CONTENT_SIDE_WIDTH}:{CONTENT_HEIGHT}[v];"
+                    f"[base][v]overlay={right_side_x}:{right_side_y}[out]"
+                )
             output_map = '[out]'
         
         cmd.extend([

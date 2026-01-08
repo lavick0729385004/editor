@@ -4,19 +4,19 @@
 BOT_TOKEN = "8145841033:AAEK1LsjRBQfGeMj9GC918oXoSJ6oc10kwM"
 
 # ============ CANVAS SETTINGS ============
-CANVAS_WIDTH = 1080
-CANVAS_HEIGHT = 1350
+CANVAS_WIDTH = 2160  # 4K resolution (2x upscale from 1080p)
+CANVAS_HEIGHT = 2700  # 4K resolution (2x upscale from 1350p)
 CANVAS_BACKGROUND = (255, 255, 255)  # White
 
 # Section dimensions
-HEADLINE_HEIGHT = 200
+HEADLINE_HEIGHT = 400  # 2x from 200
 CONTENT_HEIGHT = CANVAS_HEIGHT - HEADLINE_HEIGHT
 CONTENT_SIDE_WIDTH = CANVAS_WIDTH // 2
 
 # ============ HEADLINE SETTINGS ============
-HEADLINE_PADDING = 25
-HEADLINE_FONT_SIZE = 45
-HEADLINE_TEXT_COLOR = (0, 0, 0)  # Black
+HEADLINE_PADDING = 40
+HEADLINE_FONT_SIZE = 90  # 2x from 45
+HEADLINE_TEXT_COLOR = (255, 255, 255)  # White (with black outline)
 HEADLINE_BG_COLOR = (255, 255, 255)  # White
 
 # ============ LOGO SETTINGS ============
@@ -25,27 +25,33 @@ LOGO_OPACITY = 0.5
 
 # ============ IMAGE UPSCALING SETTINGS ============
 # Upscale factor for low-res images (1.0 = no upscale, 2.0 = 2x upscale like Topaz Proteus)
-UPSCALE_FACTOR = 1.8  # Advanced upscaling like Topaz Proteus
+UPSCALE_FACTOR = 2.0  # Professional grade upscaling
 ENABLE_UPSCALING = True
 # Image quality: 1=poor, 95=excellent (higher = slower)
-IMAGE_QUALITY = 95  # Maximum quality for Instagram
+IMAGE_QUALITY = 98  # Maximum quality for UHD
 # Resampling filter: 0=NEAREST, 1=LANCZOS (best), 2=BILINEAR, 3=BICUBIC
 RESAMPLE_FILTER = 1  # LANCZOS (best quality)
 # Use advanced upscaling algorithm (like Proteus/professional upscalers)
 ADVANCED_UPSCALING_ENABLED = True
 # Number of upscaling steps for multi-pass upscaling
-UPSCALE_STEPS = 3
+UPSCALE_STEPS = 5  # More steps for smoother upscaling
+
+# ============ VIDEO UPSCALING ============
+# Upscale input video to higher resolution
+ENABLE_VIDEO_UPSCALING = True
+VIDEO_UPSCALE_FACTOR = 1.5  # 1.5x upscale for better quality without too much slowdown
+VIDEO_UPSCALE_FILTER = 'scale_npp=interp_algo=lanczos'  # GPU-based upscaling if available, else CPU
 
 # ============ VIDEO ENCODING SETTINGS ============
 # Preset: ultrafast, superfast, veryfast, faster, fast, medium, slow, slower, veryslow
 # faster = less quality but quick | slow = better quality but slower
-VIDEO_PRESET = "fast"  # Faster encoding for quick turnaround
+VIDEO_PRESET = "medium"  # Slower for better quality (worth the wait)
 # CRF (quality): 0-51, lower=better. 23 is default, 18-23 is high quality
-VIDEO_CRF = 18  # Very high quality for Instagram
+VIDEO_CRF = 16  # Excellent quality for UHD
 # Bitrate (kbps) - None = use CRF, or specify like "8000k"
 VIDEO_BITRATE = None
 # Audio bitrate
-AUDIO_BITRATE = "256k"  # Higher audio quality
+AUDIO_BITRATE = "320k"  # High quality audio
 
 # ============ HARDWARE ACCELERATION ============
 # Enable hardware-accelerated encoding if available (CUDA/NVENC for NVIDIA)

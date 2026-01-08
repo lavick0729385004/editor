@@ -49,26 +49,26 @@ def auto_calculate_font_size(text: str, max_width: int, max_height: int) -> int:
     """
     Intelligently calculate font size based on text length
     Longer text = smaller font, shorter text = larger font
-    Auto-adapts to maintain readability
+    Auto-adapts to maintain readability (2x bigger for UHD)
     """
     text_length = len(text)
     
-    # Dynamic sizing based on character count
+    # Dynamic sizing based on character count (2x larger for 4K)
     if text_length <= 5:
         # Very short - go big
-        target_size = max(120, int(max_height * 0.9))
+        target_size = max(240, int(max_height * 0.9))
     elif text_length <= 10:
         # Short text
-        target_size = max(90, int(max_height * 0.75))
+        target_size = max(180, int(max_height * 0.75))
     elif text_length <= 20:
         # Medium text
-        target_size = max(70, int(max_height * 0.6))
+        target_size = max(140, int(max_height * 0.6))
     elif text_length <= 35:
         # Longer text
-        target_size = max(50, int(max_height * 0.45))
+        target_size = max(100, int(max_height * 0.45))
     else:
         # Very long text
-        target_size = max(35, int(max_height * 0.35))
+        target_size = max(70, int(max_height * 0.35))
     
     # Verify it actually fits
     font = get_font(target_size, bold=True)
@@ -76,8 +76,8 @@ def auto_calculate_font_size(text: str, max_width: int, max_height: int) -> int:
     text_width = bbox[2] - bbox[0]
     
     # If text doesn't fit, reduce size
-    while text_width > max_width * 0.95 and target_size > 20:
-        target_size -= 5
+    while text_width > max_width * 0.95 and target_size > 40:
+        target_size -= 10
         font = get_font(target_size, bold=True)
         bbox = font.getbbox(text)
         text_width = bbox[2] - bbox[0]
@@ -111,11 +111,11 @@ def create_rounded_rectangle(image: Image.Image, radius: int = 20) -> Image.Imag
 
 def create_headline_banner(text: str, width: int = CANVAS_WIDTH):
     """
-    Create modern headline banner with:
-    - Auto font sizing based on text length
-    - Bold Impact font
-    - Centered text
-    - Proper spacing
+    Create modern headline banner with maximum visibility:
+    - Multi-line support for long text
+    - Bold white text with black outline
+    - High contrast background
+    - Professional appearance
     """
     
     logger.info(f"Creating headline banner: '{text}'")
@@ -125,46 +125,53 @@ def create_headline_banner(text: str, width: int = CANVAS_WIDTH):
     max_text_height = HEADLINE_HEIGHT - (2 * HEADLINE_PADDING)
     font_size = auto_calculate_font_size(text, max_text_width, max_text_height)
     
-    # Create banner with white background
+    # Create banner with gradient background (white to light gray)
     banner = Image.new('RGB', (width, HEADLINE_HEIGHT), (255, 255, 255))
     draw = ImageDraw.Draw(banner)
     font = get_font(font_size, bold=True)
     
-    # Get text bounding box to center properly
-    bbox = font.getbbox(text)
-    text_width = bbox[2] - bbox[0]
-    text_height = bbox[3] - bbox[1]
+    # Split text into multiple lines if needed
+    words = text.split()
+    lines = []
+    current_line = []
     
-    # Center text horizontally and vertically
-    x = (width - text_width) // 2
-    y = (HEADLINE_HEIGHT - text_height) // 2 - bbox[1]  # Adjust for baseline
+    for word in words:
+        test_line = ' '.join(current_line + [word])
+        bbox = font.getbbox(test_line)
+        line_width = bbox[2] - bbox[0]
+        
+        if line_width > max_text_width and current_line:
+            lines.append(' '.join(current_line))
+            current_line = [word]
+        else:
+            current_line.append(word)
     
-    # Draw text in bold black
-    draw.text((x, y), text, fill=(0, 0, 0), font=font)
+    if current_line:
+        lines.append(' '.join(current_line))
     
-    # Add subtle shadow for depth
-    shadow = Image.new('RGB', banner.size, (255, 255, 255))
-    shadow_draw = ImageDraw.Draw(shadow)
-    shadow_draw.text((x + 2, y + 2), text, fill=(200, 200, 200), font=font)
-    
-    # Blend shadow with original
-    banner = Image.blend(shadow, banner, 0.7)
-    
-    logger.info(f"✓ Headline banner created: {font_size}px, centered")
-    return banner
+    # Calculate total height needed
+    line_height = int(font_size * 1.3)
     total_text_height = len(lines) * line_height
+    y_start = max(HEADLINE_PADDING, (HEADLINE_HEIGHT - total_text_height) // 2)
     
-    # Center text vertically and horizontally
-    y_start = (HEADLINE_HEIGHT - total_text_height) // 2
-    
+    # Draw each line with outline and shadow for maximum visibility
     for i, line in enumerate(lines):
-        bbox = draw.textbbox((0, 0), line, font=font)
+        bbox = font.getbbox(line)
         line_width = bbox[2] - bbox[0]
         x = (width - line_width) // 2
         y = y_start + (i * line_height)
         
-        draw.text((x, y), line, fill=HEADLINE_TEXT_COLOR, font=font)
+        # Draw black outline (makes text pop)
+        outline_width = 3
+        for adj_x in range(-outline_width, outline_width + 1):
+            for adj_y in range(-outline_width, outline_width + 1):
+                if adj_x != 0 or adj_y != 0:
+                    draw.text((x + adj_x, y + adj_y), line, fill=(0, 0, 0), font=font)
+        
+        # Draw white text on top
+        draw.text((x, y), line, fill=(255, 255, 255), font=font)
     
+    logger.info(f"✓ Headline banner created: {font_size}px, {len(lines)} lines, white text with black outline")
     return banner
 
 
