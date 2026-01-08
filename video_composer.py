@@ -15,7 +15,9 @@ logger = logging.getLogger(__name__)
 
 
 def get_video_duration(video_path):
-    """Get video duration in seconds using ffprobe"""
+    """Get video duration in seconds using ffprobe with fallback methods"""
+    
+    # Method 1: Try modern ffprobe format query
     try:
         cmd = [
             'ffprobe',
@@ -25,16 +27,99 @@ def get_video_duration(video_path):
             video_path
         ]
         
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
-        duration = float(result.stdout.strip())
-        logger.info(f"Video duration: {duration:.2f}s")
-        return duration
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=30)
+        if result.returncode == 0 and result.stdout.strip():
+            try:
+                duration = float(result.stdout.strip())
+                if duration > 0:
+                    logger.info(f"✓ Video duration (method 1): {duration:.2f}s")
+                    return duration
+            except ValueError:
+                logger.warning(f"Could not parse duration from output: {result.stdout}")
     except subprocess.TimeoutExpired:
-        logger.error("ffprobe timeout getting video duration")
-        return 0
+        logger.warning("ffprobe method 1 timeout")
     except Exception as e:
-        logger.error(f"Error getting video duration: {e}")
-        return 0
+        logger.warning(f"ffprobe method 1 failed: {e}")
+    
+    # Method 2: Try JSON output format
+    try:
+        cmd = [
+            'ffprobe',
+            '-v', 'error',
+            '-show_format',
+            '-print_format', 'json',
+            video_path
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=30)
+        if result.returncode == 0:
+            try:
+                data = json.loads(result.stdout)
+                duration = float(data.get('format', {}).get('duration', 0))
+                if duration > 0:
+                    logger.info(f"✓ Video duration (method 2): {duration:.2f}s")
+                    return duration
+            except (json.JSONDecodeError, ValueError, TypeError) as e:
+                logger.warning(f"Could not parse JSON format: {e}")
+    except subprocess.TimeoutExpired:
+        logger.warning("ffprobe method 2 timeout")
+    except Exception as e:
+        logger.warning(f"ffprobe method 2 failed: {e}")
+    
+    # Method 3: Get duration from video stream
+    try:
+        cmd = [
+            'ffprobe',
+            '-v', 'error',
+            '-select_streams', 'v:0',
+            '-show_entries', 'stream=duration',
+            '-of', 'default=noprint_wrappers=1:nokey=1:novalue=1',
+            video_path
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=30)
+        if result.returncode == 0 and result.stdout.strip():
+            try:
+                duration = float(result.stdout.strip())
+                if duration > 0:
+                    logger.info(f"✓ Video duration (method 3 - stream): {duration:.2f}s")
+                    return duration
+            except ValueError:
+                logger.warning(f"Could not parse stream duration: {result.stdout}")
+    except subprocess.TimeoutExpired:
+        logger.warning("ffprobe method 3 timeout")
+    except Exception as e:
+        logger.warning(f"ffprobe method 3 failed: {e}")
+    
+    # Method 4: Use ffmpeg to get duration (last resort)
+    try:
+        cmd = ['ffmpeg', '-i', video_path]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        
+        # Parse duration from ffmpeg stderr output: "Duration: HH:MM:SS.ms"
+        for line in result.stderr.split('\n'):
+            if 'Duration:' in line:
+                # Extract duration string
+                duration_str = line.split('Duration:')[1].split(',')[0].strip()
+                # Parse HH:MM:SS.ms format
+                parts = duration_str.split(':')
+                if len(parts) == 3:
+                    hours = int(parts[0])
+                    minutes = int(parts[1])
+                    seconds = float(parts[2])
+                    duration = hours * 3600 + minutes * 60 + seconds
+                    if duration > 0:
+                        logger.info(f"✓ Video duration (method 4 - ffmpeg): {duration:.2f}s")
+                        return duration
+    except Exception as e:
+        logger.warning(f"ffmpeg method 4 failed: {e}")
+    
+    # Fallback: Return default short duration (will create short video)
+    logger.warning("⚠️ Could not determine video duration, using default 5 seconds")
+    return 5.0  # Safer default than 0
+
+
+
 
 
 def compose_final_video(headline_img, collage_img, video_path, logo_path, output_path):
@@ -48,10 +133,12 @@ def compose_final_video(headline_img, collage_img, video_path, logo_path, output
     """
     
     try:
-        # Get video duration
+        # Get video duration (will use fallback methods if needed)
         duration = get_video_duration(video_path)
-        if duration == 0:
-            raise Exception("Could not determine video duration")
+        
+        if duration < 1:
+            logger.warning(f"⚠️ Video duration {duration}s is very short, using minimum 5s")
+            duration = 5.0
         
         logger.info(f"Creating final video with {duration:.2f}s duration")
         
