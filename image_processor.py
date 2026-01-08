@@ -1,551 +1,270 @@
-"""Image processing module for video editor bot - Modern Pro Edition with Proteus Upscaling"""
+"""Image processing module - Professional Instagram Layout"""
 
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
 import os
-from textwrap import wrap
 import logging
-import math
+from textwrap import wrap
 from config import (
-    CANVAS_WIDTH, CANVAS_HEIGHT, CANVAS_BACKGROUND,
-    HEADLINE_HEIGHT, CONTENT_HEIGHT, CONTENT_SIDE_WIDTH,
-    HEADLINE_PADDING, HEADLINE_FONT_SIZE, HEADLINE_TEXT_COLOR,
-    HEADLINE_BG_COLOR, LOGO_SIZE, LOGO_OPACITY, FONT_PATH,
-    UPSCALE_FACTOR, ENABLE_UPSCALING, IMAGE_QUALITY, RESAMPLE_FILTER,
-    MAX_INTERMEDIATE_SIZE
+    CANVAS_WIDTH, CANVAS_HEIGHT, HEADLINE_HEIGHT, CONTENT_HEIGHT,
+    CONTENT_SIDE_WIDTH, CONTENT_GAP, CORNER_RADIUS,
+    HEADLINE_PADDING, HEADLINE_FONT_SIZE_MIN, HEADLINE_FONT_SIZE_MAX,
+    HEADLINE_TEXT_COLOR, HEADLINE_BG_COLOR, HEADLINE_LINE_SPACING,
+    LOGO_SIZE, LOGO_OPACITY, IMAGE_QUALITY, RESAMPLE_FILTER,
+    MAX_INTERMEDIATE_SIZE, FONTS_DIR
 )
 
 logger = logging.getLogger(__name__)
 
-# Modern font paths (Priority order)
 FONT_PATHS = [
     "assets/fonts/impact.ttf",
     "assets/impact.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-    "/System/Library/Fonts/Impact.ttf",  # macOS
-    "C:\\Windows\\Fonts\\impact.ttf",  # Windows
+    "/System/Library/Fonts/Impact.ttf",
+    "C:\\Windows\\Fonts\\impact.ttf",
 ]
 
 
-def get_font(size: int, bold: bool = True):
-    """Get font object with fallback - tries Impact.ttf first, then system fonts"""
-    # Try all font paths
+def get_font(size: int):
+    """Get Impact/Arial Black bold font with fallback"""
     for font_path in FONT_PATHS:
         try:
             if os.path.exists(font_path):
-                logger.debug(f"Loading font: {font_path} at size {size}")
                 return ImageFont.truetype(font_path, size)
-        except Exception as e:
-            logger.debug(f"Could not load {font_path}: {e}")
+        except:
+            pass
+    return ImageFont.load_default()
+
+
+def apply_rounded_corners(image: Image.Image, radius: int = CORNER_RADIUS, 
+                         corners=['tl', 'tr', 'bl', 'br']) -> Image.Image:
+    """Apply rounded corners to image using alpha channel
     
-    # Fallback to system fonts
-    try:
-        return ImageFont.load_default()
-    except:
-        return ImageFont.load_default()
-
-
-
-def auto_calculate_font_size(text: str, max_width: int, max_height: int) -> int:
+    Args:
+        image: PIL Image
+        radius: corner radius in pixels
+        corners: list of corners to round ['tl', 'tr', 'bl', 'br']
     """
-    Intelligently calculate font size based on text length
-    Longer text = smaller font, shorter text = larger font
-    Auto-adapts to maintain readability (2x bigger for UHD)
+    # Convert to RGBA if needed
+    if image.mode != 'RGBA':
+        image = image.convert('RGBA')
+    
+    # Create mask
+    width, height = image.size
+    mask = Image.new('L', (width, height), 255)
+    mask_draw = ImageDraw.Draw(mask)
+    
+    # Draw corners
+    if 'tl' in corners:
+        mask_draw.ellipse([0, 0, radius*2, radius*2], fill=0)
+    if 'tr' in corners:
+        mask_draw.ellipse([width-radius*2, 0, width, radius*2], fill=0)
+    if 'bl' in corners:
+        mask_draw.ellipse([0, height-radius*2, radius*2, height], fill=0)
+    if 'br' in corners:
+        mask_draw.ellipse([width-radius*2, height-radius*2, width, height], fill=0)
+    
+    # Apply mask
+    image.putalpha(mask)
+    return image
+
+
+def create_headline_banner(text: str) -> Image.Image:
+    """Create professional headline with black text on white background
+    
+    - White background
+    - Black bold Impact font
+    - Center-aligned, multi-line
+    - Auto-scaled font size
     """
-    text_length = len(text)
+    logger.info(f"Creating headline: '{text}'")
     
-    # Dynamic sizing based on character count (2x larger for 4K)
-    if text_length <= 5:
-        # Very short - go big
-        target_size = max(240, int(max_height * 0.9))
-    elif text_length <= 10:
-        # Short text
-        target_size = max(180, int(max_height * 0.75))
-    elif text_length <= 20:
-        # Medium text
-        target_size = max(140, int(max_height * 0.6))
-    elif text_length <= 35:
-        # Longer text
-        target_size = max(100, int(max_height * 0.45))
-    else:
-        # Very long text
-        target_size = max(70, int(max_height * 0.35))
+    # Calculate font size dynamically
+    max_width = CANVAS_WIDTH - (2 * HEADLINE_PADDING)
+    font_size = HEADLINE_FONT_SIZE_MAX
+    font = get_font(font_size)
     
-    # Verify it actually fits
-    font = get_font(target_size, bold=True)
-    bbox = font.getbbox(text)
-    text_width = bbox[2] - bbox[0]
-    
-    # If text doesn't fit, reduce size
-    while text_width > max_width * 0.95 and target_size > 40:
-        target_size -= 10
-        font = get_font(target_size, bold=True)
-        bbox = font.getbbox(text)
-        text_width = bbox[2] - bbox[0]
-    
-    logger.info(f"Auto-calculated font size: {target_size}px for '{text[:30]}...'")
-    return target_size
-
-
-def create_rounded_rectangle(image: Image.Image, radius: int = 20) -> Image.Image:
-    """Create rounded corners on image"""
-    try:
-        # Create a mask for rounded corners
-        width, height = image.size
-        mask = Image.new('L', (width, height), 0)
-        mask_draw = ImageDraw.Draw(mask)
+    # Find optimal font size
+    while font_size > HEADLINE_FONT_SIZE_MIN:
+        test_bbox = font.getbbox(text)
+        test_width = test_bbox[2] - test_bbox[0]
         
-        # Draw white rounded rectangle on mask
-        mask_draw.rounded_rectangle(
-            [(0, 0), (width - 1, height - 1)],
-            radius=radius,
-            fill=255
-        )
+        if test_width <= max_width:
+            break
         
-        # Apply mask to image
-        image.putalpha(mask)
-        return image
-    except Exception as e:
-        logger.warning(f"Could not create rounded corners: {e}")
-        return image
-
-
-def create_headline_banner(text: str, width: int = CANVAS_WIDTH):
-    """
-    Create modern headline banner with maximum visibility:
-    - Multi-line support for long text
-    - Bold white text with black outline
-    - High contrast background
-    - Professional appearance
-    """
+        font_size -= 2
+        font = get_font(font_size)
     
-    logger.info(f"Creating headline banner: '{text}'")
+    # Split into lines
+    avg_char_width = font.getbbox('A')[2] - font.getbbox('A')[0]
+    chars_per_line = max_width // avg_char_width
+    lines = wrap(text, width=int(chars_per_line))
     
-    # Calculate optimal font size
-    max_text_width = width - (2 * HEADLINE_PADDING)
-    max_text_height = HEADLINE_HEIGHT - (2 * HEADLINE_PADDING)
-    font_size = auto_calculate_font_size(text, max_text_width, max_text_height)
+    # Calculate banner height based on lines
+    line_height = int(font_size * HEADLINE_LINE_SPACING)
+    actual_height = (len(lines) * line_height) + (2 * HEADLINE_PADDING)
     
-    # Create banner with gradient background (white to light gray)
-    banner = Image.new('RGB', (width, HEADLINE_HEIGHT), (255, 255, 255))
+    # Create banner
+    banner = Image.new('RGB', (CANVAS_WIDTH, actual_height), HEADLINE_BG_COLOR)
     draw = ImageDraw.Draw(banner)
-    font = get_font(font_size, bold=True)
     
-    # Split text into multiple lines if needed
-    words = text.split()
-    lines = []
-    current_line = []
-    
-    for word in words:
-        test_line = ' '.join(current_line + [word])
-        bbox = font.getbbox(test_line)
-        line_width = bbox[2] - bbox[0]
-        
-        if line_width > max_text_width and current_line:
-            lines.append(' '.join(current_line))
-            current_line = [word]
-        else:
-            current_line.append(word)
-    
-    if current_line:
-        lines.append(' '.join(current_line))
-    
-    # Calculate total height needed
-    line_height = int(font_size * 1.3)
+    # Draw text centered
     total_text_height = len(lines) * line_height
-    y_start = max(HEADLINE_PADDING, (HEADLINE_HEIGHT - total_text_height) // 2)
+    y_start = (actual_height - total_text_height) // 2
     
-    # Draw each line with outline and shadow for maximum visibility
     for i, line in enumerate(lines):
         bbox = font.getbbox(line)
         line_width = bbox[2] - bbox[0]
-        x = (width - line_width) // 2
+        x = (CANVAS_WIDTH - line_width) // 2
         y = y_start + (i * line_height)
         
-        # Draw black outline (makes text pop)
-        outline_width = 3
-        for adj_x in range(-outline_width, outline_width + 1):
-            for adj_y in range(-outline_width, outline_width + 1):
-                if adj_x != 0 or adj_y != 0:
-                    draw.text((x + adj_x, y + adj_y), line, fill=(0, 0, 0), font=font)
-        
-        # Draw white text on top
-        draw.text((x, y), line, fill=(255, 255, 255), font=font)
+        draw.text((x, y), line, fill=HEADLINE_TEXT_COLOR, font=font)
     
-    logger.info(f"✓ Headline banner created: {font_size}px, {len(lines)} lines, white text with black outline")
-    return banner
+    logger.info(f"✓ Headline created: {font_size}px, {len(lines)} lines, {actual_height}px height")
+    return banner, actual_height
 
 
-def advanced_upscale(image: Image.Image, scale_factor: float) -> Image.Image:
+def create_image_collage(image_paths: list) -> Image.Image:
+    """Create collage from images with rounded corners
+    
+    - 1 image: Full height, rounded all corners
+    - 2 images: Stacked, top/bottom corners rounded
+    - 3+ images: Equal split, rounded outer corners
     """
-    Advanced upscaling using edge-aware filtering (Proteus-style)
-    - Multi-pass upscaling for smoother results
-    - Edge preservation and sharpening
-    - Noise reduction
-    - Color preservation
-    """
-    try:
-        from config import UPSCALE_STEPS
-        
-        logger.info(f"Starting advanced upscaling: {scale_factor}x using {UPSCALE_STEPS} steps")
-        
-        current = image.copy()
-        current_size = image.size
-        
-        # Multi-step upscaling for better quality
-        step_scale = scale_factor ** (1 / UPSCALE_STEPS)
-        
-        for step in range(UPSCALE_STEPS):
-            target_width = int(current_size[0] * (step_scale ** (step + 1)))
-            target_height = int(current_size[1] * (step_scale ** (step + 1)))
-            
-            # Step 1: Lanczos upscaling
-            current = current.resize((target_width, target_height), Image.Resampling.LANCZOS)
-            
-            # Step 2: Bilateral filtering for edge preservation
-            # Apply slight blur then sharpen to enhance edges
-            blurred = current.filter(ImageFilter.GaussianBlur(radius=0.5))
-            
-            # Step 3: Edge enhancement via unsharp mask
-            enhancer = ImageEnhance.Sharpness(current)
-            current = enhancer.enhance(1.5)  # More aggressive sharpening
-            
-            logger.info(f"Upscale step {step+1}/{UPSCALE_STEPS}: {current_size} → {current.size}")
-        
-        # Final polishing
-        # Step 4: Enhance contrast for punchy look
-        contrast_enhancer = ImageEnhance.Contrast(current)
-        current = contrast_enhancer.enhance(1.15)
-        
-        # Step 5: Enhance color saturation slightly
-        color_enhancer = ImageEnhance.Color(current)
-        current = color_enhancer.enhance(1.05)
-        
-        logger.info(f"✓ Advanced upscaling complete: {scale_factor:.2f}x applied successfully")
-        return current
-        
-    except Exception as e:
-        logger.warning(f"Advanced upscaling failed: {e}, using fallback")
-        # Fallback: simple LANCZOS resize
-        target_size = (int(image.width * scale_factor), int(image.height * scale_factor))
-        return image.resize(target_size, Image.Resampling.LANCZOS)
-
-
-def resize_and_crop_to_fit(image: Image.Image, target_width: int, target_height: int) -> Image.Image:
-    """
-    Intelligently resize and crop image with advanced upscaling
-    - No distortion (maintains aspect ratio)
-    - Advanced upscaling (Proteus-like)
-    - Smart center-crop
-    - Edge preservation
-    """
+    logger.info(f"Creating collage with {len(image_paths)} images")
     
-    try:
-        img_width, img_height = image.size
-        logger.info(f"Resizing from {img_width}x{img_height} to {target_width}x{target_height}")
-        
-        # Limit intermediate size to save memory
-        if img_width > MAX_INTERMEDIATE_SIZE or img_height > MAX_INTERMEDIATE_SIZE:
-            scale = MAX_INTERMEDIATE_SIZE / max(img_width, img_height)
-            new_size = (int(img_width * scale), int(img_height * scale))
-            image = image.resize(new_size, Image.Resampling.LANCZOS)
-            img_width, img_height = image.size
-        
-        # Calculate aspect ratios
-        img_aspect = img_width / img_height
-        target_aspect = target_width / target_height
-        
-        # Determine scale to fit
-        if img_aspect > target_aspect:
-            # Image is wider - fit by height
-            scale_ratio = target_height / img_height
-        else:
-            # Image is taller - fit by width
-            scale_ratio = target_width / img_width
-        
-        # Apply advanced upscaling if beneficial
-        if ENABLE_UPSCALING and scale_ratio > 1.0:
-            # Use advanced upscaling up to UPSCALE_FACTOR
-            actual_scale = min(scale_ratio, UPSCALE_FACTOR)
-            logger.info(f"Upscaling enabled: {scale_ratio:.2f}x (capped at {UPSCALE_FACTOR}x)")
-            image = advanced_upscale(image, actual_scale)
-            img_width, img_height = image.size
-            
-            # Recalculate if we hit the cap
-            img_aspect = img_width / img_height
-            if img_aspect > target_aspect:
-                scale_ratio = target_height / img_height
-            else:
-                scale_ratio = target_width / img_width
-        
-        # Resize with best quality
-        new_width = int(img_width * scale_ratio)
-        new_height = int(img_height * scale_ratio)
-        
-        resized = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-        
-        # Sharpen edges for professional look
-        enhancer = ImageEnhance.Sharpness(resized)
-        resized = enhancer.enhance(1.2)
-        
-        # Center crop to exact target size
-        if new_width > target_width or new_height > target_height:
-            left = (new_width - target_width) // 2
-            top = (new_height - target_height) // 2
-            right = left + target_width
-            bottom = top + target_height
-            
-            cropped = resized.crop((left, top, right, bottom))
-            logger.info(f"✓ Resized and cropped to {target_width}x{target_height}")
-            return cropped
-        else:
-            # Pad if too small
-            padded = Image.new('RGB', (target_width, target_height), (255, 255, 255))
-            x_offset = (target_width - new_width) // 2
-            y_offset = (target_height - new_height) // 2
-            padded.paste(resized, (x_offset, y_offset))
-            logger.info(f"✓ Resized and padded to {target_width}x{target_height}")
-            return padded
-        
-    except Exception as e:
-        logger.error(f"Error resizing image: {e}")
-        # Return white placeholder
-        return Image.new('RGB', (target_width, target_height), (255, 255, 255))
-
-
-
-def create_image_collage(image_list, width=CONTENT_SIDE_WIDTH, height=CONTENT_HEIGHT):
-    """
-    Create modern image collage with:
-    - Rounded corners on each image
-    - Proper aspect ratio preservation (no distortion)
-    - Auto-padding for smaller images
-    - Enhanced contrast
-    """
-    
-    if not image_list:
-        # Return white canvas if no images
-        return Image.new('RGB', (width, height), CANVAS_BACKGROUND)
-    
-    logger.info(f"Creating collage with {len(image_list)} images")
-    
-    num_images = len(image_list)
-    slot_height = height // num_images
-    corner_radius = 15  # Rounded corners
-    
-    # Create base collage
-    collage = Image.new('RGB', (width, height), (255, 255, 255))
-    
-    for i, img_path in enumerate(image_list):
+    # Load images
+    images = []
+    for path in image_paths:
         try:
-            # Open and process image
-            img = Image.open(img_path).convert('RGB')
-            logger.info(f"Processing image {i+1}/{num_images}: {img.size}")
-            
-            # Optimize image (reduce memory footprint)
-            if img.size[0] > MAX_INTERMEDIATE_SIZE or img.size[1] > MAX_INTERMEDIATE_SIZE:
-                max_dim = max(img.size)
-                scale = MAX_INTERMEDIATE_SIZE / max_dim
-                new_size = (int(img.size[0] * scale), int(img.size[1] * scale))
-                img = img.resize(new_size, Image.Resampling.LANCZOS)
-            
-            # Resize to fit slot WITHOUT distortion (center-crop if needed)
-            slot_width = width
-            slot_top = i * slot_height
-            
-            # Calculate aspect ratios
-            img_aspect = img.size[0] / img.size[1]
-            slot_aspect = slot_width / slot_height
-            
-            # Smart resize: maintain aspect ratio
-            if img_aspect > slot_aspect:
-                # Image is wider - fit by height
-                new_height = slot_height
-                new_width = int(new_height * img_aspect)
-            else:
-                # Image is taller - fit by width
-                new_width = slot_width
-                new_height = int(new_width / img_aspect)
-            
-            img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-            
-            # Center crop if needed
-            if img.size[0] > slot_width:
-                left = (img.size[0] - slot_width) // 2
-                img = img.crop((left, 0, left + slot_width, img.size[1]))
-            
-            if img.size[1] > slot_height:
-                top = (img.size[1] - slot_height) // 2
-                img = img.crop((0, top, img.size[0], top + slot_height))
-            
-            # Pad if needed to exact slot size
-            if img.size[0] < slot_width or img.size[1] < slot_height:
-                padded = Image.new('RGB', (slot_width, slot_height), (255, 255, 255))
-                x_offset = (slot_width - img.size[0]) // 2
-                y_offset = (slot_height - img.size[1]) // 2
-                padded.paste(img, (x_offset, y_offset))
-                img = padded
-            
-            # Add rounded corners
-            img = add_rounded_corners(img, radius=corner_radius)
-            
-            # Enhance contrast for modern look
-            enhancer = ImageEnhance.Contrast(img)
-            img = enhancer.enhance(1.1)
-            
-            # Add slight brightness boost
-            enhancer = ImageEnhance.Brightness(img)
-            img = enhancer.enhance(1.05)
-            
-            # Paste into collage
-            collage.paste(img, (0, slot_top))
-            logger.info(f"✓ Image {i+1} pasted")
-            
+            img = Image.open(path).convert('RGB')
+            images.append(img)
         except Exception as e:
-            logger.error(f"Error processing image {img_path}: {e}")
-            # Fill with light gray if error
-            gray_fill = Image.new('RGB', (width, slot_height), (240, 240, 240))
-            collage.paste(gray_fill, (0, i * slot_height))
+            logger.error(f"Failed to load {path}: {e}")
     
-    logger.info(f"✓ Collage created: {width}x{height}")
-    return collage
-
-
-def add_rounded_corners(image: Image.Image, radius: int = 15) -> Image.Image:
-    """Add rounded corners to image for modern look"""
-    try:
-        width, height = image.size
-        
-        # Create rounded mask
-        mask = Image.new('L', (width, height), 0)
-        mask_draw = ImageDraw.Draw(mask)
-        mask_draw.rounded_rectangle(
-            [(0, 0), (width - 1, height - 1)],
-            radius=radius,
-            fill=255
-        )
-        
-        # Create image with alpha channel
-        if image.mode != 'RGBA':
-            image = image.convert('RGBA')
-        
-        # Apply mask
-        image.putalpha(mask)
-        
-        # Convert back to RGB with white background
-        white_bg = Image.new('RGB', image.size, (255, 255, 255))
-        white_bg.paste(image, (0, 0), image)
-        return white_bg
-        
-    except Exception as e:
-        logger.warning(f"Could not add rounded corners: {e}")
-        return image
-
-
-
-def add_logo_overlay(base_image, logo_path, opacity: float = 0.5):
-    """
-    Add professional logo watermark at center with 50% opacity
-    - Centered positioning
-    - Smooth alpha blending
-    - Rounded corners on logo
-    """
+    if not images:
+        # Return white placeholder
+        return Image.new('RGB', (CONTENT_SIDE_WIDTH, CONTENT_HEIGHT), (255, 255, 255))
     
-    if not os.path.exists(logo_path):
-        logger.warning(f"Logo not found: {logo_path}")
-        return base_image.copy()
+    # Calculate dimensions per image
+    num_images = len(images)
+    if num_images == 1:
+        img_height = CONTENT_HEIGHT
+    else:
+        img_height = (CONTENT_HEIGHT - ((num_images - 1) * CONTENT_GAP)) // num_images
     
-    try:
-        # Open logo and convert to RGBA
-        logo = Image.open(logo_path).convert('RGBA')
-        logger.info(f"Logo loaded: {logo.size}")
+    # Resize and crop images to fit
+    processed = []
+    for i, img in enumerate(images):
+        # Center crop to fit slot
+        img_w, img_h = img.size
+        aspect = img_w / img_h
+        target_aspect = CONTENT_SIDE_WIDTH / img_height
         
-        # Resize logo with LANCZOS (best quality)
-        logo.thumbnail((LOGO_SIZE, LOGO_SIZE), Image.Resampling.LANCZOS)
-        
-        # Add rounded corners to logo for modern look
-        logo = _add_logo_rounded_corners(logo, radius=5)
-        
-        # Apply exact 50% opacity (0.5 = 50%)
-        if logo.mode == 'RGBA':
-            r, g, b, a = logo.split()
-            # Multiply alpha channel by opacity factor
-            a = a.point(lambda p: int(p * opacity))
-            logo = Image.merge('RGBA', (r, g, b, a))
+        if aspect > target_aspect:
+            # Image is wider, crop sides
+            new_w = int(img_h * target_aspect)
+            crop_left = (img_w - new_w) // 2
+            img = img.crop((crop_left, 0, crop_left + new_w, img_h))
         else:
-            logo = logo.convert('RGBA')
-            alpha = logo.split()[3]
-            alpha = alpha.point(lambda p: int(p * opacity))
-            logo.putalpha(alpha)
+            # Image is taller, crop top/bottom
+            new_h = int(img_w / target_aspect)
+            crop_top = (img_h - new_h) // 2
+            img = img.crop((0, crop_top, img_w, crop_top + new_h))
         
-        logger.info(f"Logo opacity set to {opacity*100:.0f}%")
+        # Resize to exact dimensions
+        img = img.resize((CONTENT_SIDE_WIDTH, img_height), Image.Resampling.LANCZOS)
         
-        # Convert base to RGBA if needed
-        result = base_image.convert('RGBA')
+        # Apply rounded corners (only outer corners)
+        corners = []
+        if i == 0:  # Top image
+            corners.append('tl')
+            if num_images == 1:  # Only image
+                corners.extend(['tr', 'br'])
+            corners.append('bl' if num_images > 1 else 'br')
         
-        # Calculate center position (perfect centering)
-        logo_width, logo_height = logo.size
-        center_x = (result.width - logo_width) // 2
-        center_y = (result.height - logo_height) // 2
+        if num_images > 1 and i == num_images - 1:  # Bottom image
+            corners.extend(['bl', 'br'])
         
-        logger.info(f"Pasting logo at center: ({center_x}, {center_y})")
+        if num_images > 2 and 0 < i < num_images - 1:  # Middle images
+            pass  # No rounded corners on middle images
         
-        # Paste logo with smooth alpha blending
-        result.paste(logo, (center_x, center_y), logo)
+        if num_images == 1:
+            corners = ['tl', 'tr', 'bl', 'br']
         
-        # Convert back to RGB
-        final = Image.new('RGB', result.size, (255, 255, 255))
-        final.paste(result, (0, 0), result)
-        
-        logger.info("✓ Logo overlay complete")
-        return final
-        
-    except Exception as e:
-        logger.error(f"Error adding logo: {e}")
-        return base_image.copy()
+        img = apply_rounded_corners(img, CORNER_RADIUS, corners)
+        processed.append(img)
+    
+    # Stack images vertically
+    collage = Image.new('RGBA', (CONTENT_SIDE_WIDTH, CONTENT_HEIGHT), (255, 255, 255, 0))
+    y_offset = 0
+    
+    for img in processed:
+        collage.paste(img, (0, y_offset), img if img.mode == 'RGBA' else None)
+        y_offset += img.height + CONTENT_GAP
+    
+    # Convert back to RGB with white background
+    result = Image.new('RGB', (CONTENT_SIDE_WIDTH, CONTENT_HEIGHT), (255, 255, 255))
+    result.paste(collage, (0, 0), collage)
+    
+    logger.info(f"✓ Collage created: {CONTENT_SIDE_WIDTH}x{CONTENT_HEIGHT}")
+    return result
 
 
-def _add_logo_rounded_corners(image: Image.Image, radius: int = 5) -> Image.Image:
-    """Add subtle rounded corners to logo"""
-    try:
-        width, height = image.size
-        
-        # Create rounded mask
-        mask = Image.new('L', (width, height), 0)
-        mask_draw = ImageDraw.Draw(mask)
-        mask_draw.rounded_rectangle(
-            [(0, 0), (width - 1, height - 1)],
-            radius=radius,
-            fill=255
-        )
-        
-        # Apply mask to alpha channel
-        if image.mode == 'RGBA':
-            r, g, b, a = image.split()
-            # Combine with new mask
-            a = Image.composite(mask, a, mask)
-            image = Image.merge('RGBA', (r, g, b, a))
-        
-        return image
-    except Exception as e:
-        logger.debug(f"Could not add rounded corners to logo: {e}")
-        return image
+def create_video_frame(video_path: str, width: int = CONTENT_SIDE_WIDTH, 
+                      height: int = CONTENT_HEIGHT) -> Image.Image:
+    """Create placeholder frame for video with rounded corners"""
+    # For now, return dark placeholder with rounded corners
+    frame = Image.new('RGB', (width, height), (50, 50, 50))
+    frame = apply_rounded_corners(frame, CORNER_RADIUS, ['tr', 'br'])
+    return frame
 
 
-
-def create_static_frame(headline_img, collage_img, logo_path):
-    """Combine headline, collage, and logo into single frame for video"""
+def create_final_layout(headline: Image.Image, headline_height: int,
+                       collage: Image.Image, video_frame: Image.Image,
+                       logo_path: str) -> Image.Image:
+    """Combine all elements into final layout
+    
+    Structure:
+    - Top: Headline (white bg, black text)
+    - Bottom: Left=collage (rounded), Right=video (rounded), gap between
+    - Overlay: Logo centered at 50% opacity
+    """
     
     # Create base canvas
-    canvas = Image.new('RGB', (CANVAS_WIDTH, CANVAS_HEIGHT), CANVAS_BACKGROUND)
+    canvas = Image.new('RGB', (CANVAS_WIDTH, CANVAS_HEIGHT), (255, 255, 255))
     
-    # Paste headline at top
-    canvas.paste(headline_img, (0, 0))
+    # Paste headline (may be different height than expected)
+    canvas.paste(headline, (0, 0))
+    content_start_y = headline.height
     
-    # Paste collage on left side
-    content_start_y = HEADLINE_HEIGHT
-    canvas.paste(collage_img, (0, content_start_y))
+    # Paste collage (left side)
+    canvas.paste(collage, (0, content_start_y))
     
-    # Add logo overlay on top of everything
-    canvas = add_logo_overlay(canvas, logo_path)
+    # Paste video frame (right side)
+    canvas.paste(video_frame, (CONTENT_SIDE_WIDTH + CONTENT_GAP, content_start_y))
     
+    # Overlay logo at center with 50% opacity
+    if os.path.exists(logo_path):
+        try:
+            logo = Image.open(logo_path).convert('RGBA')
+            
+            # Resize logo
+            logo_width = LOGO_SIZE
+            aspect = logo.size[1] / logo.size[0]
+            logo_height = int(logo_width * aspect)
+            logo = logo.resize((logo_width, logo_height), Image.Resampling.LANCZOS)
+            
+            # Adjust opacity
+            logo.putalpha(int(255 * LOGO_OPACITY))
+            
+            # Center logo
+            logo_x = (CANVAS_WIDTH - logo_width) // 2
+            logo_y = (CANVAS_HEIGHT - logo_height) // 2
+            
+            canvas.paste(logo, (logo_x, logo_y), logo)
+            logger.info(f"✓ Logo overlaid at ({logo_x}, {logo_y}) with {LOGO_OPACITY*100}% opacity")
+        except Exception as e:
+            logger.warning(f"Could not overlay logo: {e}")
+    
+    logger.info(f"✓ Final layout created: {CANVAS_WIDTH}x{CANVAS_HEIGHT}")
     return canvas

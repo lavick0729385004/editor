@@ -22,7 +22,7 @@ from config import (
     MAX_TOTAL_SESSION, DEBUG_KEEP_TEMP
 )
 from image_processor import (
-    create_headline_banner, create_image_collage, create_static_frame
+    create_headline_banner, create_image_collage, create_video_frame, create_final_layout
 )
 from video_composer import compose_final_video, check_ffmpeg_installed
 
@@ -456,14 +456,14 @@ async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         return WAITING_VIDEO
 
 
-def process_video_background(headline_img, collage_img, video_path, logo_path, output_path):
+def process_video_background(layout_img, video_path, logo_path, output_path):
     """Background thread function for video processing (prevents blocking)"""
     try:
         logger.info("🎥 Starting background video processing...")
         start_time = datetime.now()
         
         success = compose_final_video(
-            headline_img, collage_img, video_path, logo_path, output_path
+            layout_img, None, video_path, logo_path, output_path
         )
         
         elapsed = (datetime.now() - start_time).total_seconds()
@@ -476,7 +476,6 @@ def process_video_background(headline_img, collage_img, video_path, logo_path, o
     except Exception as e:
         logger.error(f"Background processing error: {e}\n{traceback.format_exc()}")
         return False
-
 
 async def process_video(update: Update, context: ContextTypes.DEFAULT_TYPE, session: BotSession) -> int:
     """Process all files and create final video with async background processing"""
@@ -505,7 +504,7 @@ async def process_video(update: Update, context: ContextTypes.DEFAULT_TYPE, sess
         
         # Step 1: Create headline banner
         logger.info("Creating headline banner...")
-        headline_img = create_headline_banner(session.headline)
+        headline_img, headline_height = create_headline_banner(session.headline)
         
         # Progress: Creating collage
         await progress_msg.edit_text(
@@ -518,7 +517,11 @@ async def process_video(update: Update, context: ContextTypes.DEFAULT_TYPE, sess
         logger.info(f"Creating collage with {len(session.images)} images...")
         collage_img = create_image_collage(session.images)
         
-        # Progress: Combining
+        # Step 3: Create video frame placeholder
+        logger.info("Creating video frame...")
+        video_frame = create_video_frame()
+        
+        # Step 4: Create final layout
         await progress_msg.edit_text(
             "🎬 <b>Processing your video...</b>\n\n"
             "1️⃣ Creating headline... ✅\n"
@@ -526,7 +529,9 @@ async def process_video(update: Update, context: ContextTypes.DEFAULT_TYPE, sess
             "3️⃣ Composing video... ⏳"
         )
         
-        # Step 3: Compose final video
+        final_layout = create_final_layout(headline_img, headline_height, collage_img, video_frame, LOGO_PATH)
+        
+        # Step 5: Compose final video
         output_path = os.path.join(session.temp_dir, "final_video.mp4")
         logger.info(f"Composing video: {output_path}")
         
@@ -546,12 +551,9 @@ async def process_video(update: Update, context: ContextTypes.DEFAULT_TYPE, sess
         success = await loop.run_in_executor(
             executor,
             process_video_background,
-            headline_img, collage_img, session.video, LOGO_PATH, output_path
+            final_layout, session.video, LOGO_PATH, output_path
         )
         elapsed = (datetime.now() - start_time).total_seconds()
-        
-        if not success:
-            raise Exception("Video composition failed - check logs")
         
         if not os.path.exists(output_path):
             raise Exception("Output video file was not created")
