@@ -350,18 +350,45 @@ async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         
         logger.info(f"Video/Document received: {doc.file_name if hasattr(doc, 'file_name') else 'N/A'}, size: {doc.file_size} bytes")
         
-        # Get file extension (videos might not have file_name, so use default)
-        file_name = getattr(doc, 'file_name', 'video.mp4')
-        file_ext = os.path.splitext(file_name)[1].lower() or '.mp4'
+        # Extract file extension with robust handling for all video types
+        file_name = getattr(doc, 'file_name', None)
+        
+        # If no file_name, try to use MIME type or default
+        if not file_name:
+            mime_type = getattr(doc, 'mime_type', 'video/mp4')
+            # Map MIME types to extensions (comprehensive list)
+            mime_to_ext = {
+                'video/mp4': '.mp4',
+                'video/quicktime': '.mov',
+                'video/x-msvideo': '.avi',
+                'video/x-matroska': '.mkv',
+                'video/webm': '.webm',
+                'video/x-flv': '.flv',
+                'video/x-ms-wmv': '.wmv',
+                'video/3gpp': '.3gp',
+                'video/3gpp2': '.3g2',
+                'video/x-m4v': '.m4v',
+                'video/mp2t': '.ts',
+                'video/mpeg': '.mpeg',
+                'video/ogg': '.ogv',
+            }
+            file_ext = mime_to_ext.get(mime_type, '.mp4')
+            file_name = f'video{file_ext}'
+            logger.info(f"No file_name, using MIME type: {mime_type} → {file_ext}")
+        else:
+            file_ext = os.path.splitext(file_name)[1].lower()
+            if not file_ext or file_ext == '.':
+                file_ext = '.mp4'
+                logger.warning(f"File has no extension, defaulting to .mp4")
         
         logger.info(f"File name: {file_name}, Extension: {file_ext}")
         logger.info(f"Supported formats: {SUPPORTED_VIDEO_FORMATS}")
         
-        if file_ext not in SUPPORTED_VIDEO_FORMATS:
-            msg = f"⚠️ Unsupported format: {file_ext}\nSupported: {', '.join(SUPPORTED_VIDEO_FORMATS)}"
-            logger.warning(msg)
-            await update.message.reply_text(msg)
-            return WAITING_VIDEO
+        # Check if format is supported (or allow all if extension not in list)
+        if file_ext not in SUPPORTED_VIDEO_FORMATS and file_ext != '.mp4':
+            logger.warning(f"Format {file_ext} may not be supported, but attempting anyway...")
+        
+        logger.info(f"✓ File format OK: {file_ext}")
         
         file_size_mb = doc.file_size / (1024 * 1024)
         if file_size_mb > MAX_VIDEO_SIZE:

@@ -57,7 +57,14 @@ MAX_TOTAL_SESSION = 1500  # Total MB per session
 
 # ============ SUPPORTED FORMATS ============
 SUPPORTED_IMAGE_FORMATS = {'.jpg', '.jpeg', '.png', '.webp', '.bmp'}
-SUPPORTED_VIDEO_FORMATS = {'.mp4', '.mov', '.avi', '.mkv', '.flv', '.wmv'}
+# All common video formats - bot accepts ANY video type
+SUPPORTED_VIDEO_FORMATS = {
+    '.mp4', '.mov', '.avi', '.mkv', '.mkv', '.webm', '.flv', '.wmv',  # Common
+    '.3gp', '.3g2', '.m4v', '.ts', '.mts', '.m2ts',  # Mobile/Streaming
+    '.mpeg', '.mpg', '.mpeg2', '.ogv', '.ogg',  # Legacy/Open
+    '.mxf', '.vob', '.asf', '.rm', '.rmvb',  # Professional/Legacy
+    '.f4v', '.hevc', '.h265', '.vp8', '.vp9',  # Modern codecs
+}  # FFmpeg will handle any format
 
 # ============ PROCESSING SETTINGS ============
 # Enable parallel processing
